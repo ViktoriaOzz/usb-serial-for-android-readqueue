@@ -77,6 +77,7 @@ public class SerialPortListener implements com.hoho.android.usbserial.util.Seria
         this.permissionPendingIntent = PendingIntent.getBroadcast(context, 0,
                 new Intent(ACTION_USB_PERMISSION) /*INTENT_ACTION_GRANT_USB*/, intentFlag);
 
+
         /// Initialize serial port entities
         try{
             // для броадкаст ресиверов
@@ -266,19 +267,23 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         // driver.getDevice().equals(device)
         currentDevice = driver.getDevice();
 
-        /// Try open cnnect
+        /// Try to close connect thread
         reentrantLock.lock();
         try{
             try{
-                if(isThreadRunning.get())
+                if(isThreadRunning.compareAndSet(true, false))
                     closeConnectionThread();
-
+                // TODO clear close connection !!!
+                if(isThreadRunning.compareAndSet(false, true)){
+                    openConnectionThread(currentDevice);
+                }
             }
             finally{
                 reentrantLock.unlock();
             }
-
             ///  there re opening of thread
+            // start thread with loopa - achieve permission
+
             openConnectionToDevice(driver);
         }
         catch(Exception e){
@@ -295,7 +300,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
     private void closeConnectionThread(){
         reentrantLock.lock();
         try{
-            if(openedConnectionThread != null && isThreadRunning.get()){
+            if(openedConnectionThread != null && isThreadRunning.compareAndSet(true, false)){
                 try{
                     openedConnectionThread.join(500);
                 }
@@ -312,6 +317,27 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         finally{
             reentrantLock.unlock();
         }
+    }
+
+    private void openConnectionThread(UsbDevice device){
+        // here we requestin permissions
+        if(usbManager == null){
+            // TODO handle
+            return; // no, try again
+        }
+        if(device == null){
+            return;
+        }
+        try{
+            while(!(usbManager.hasPermission(device))){
+                usbManager.requestPermission(device, permissionPendingIntent);
+                Thread.sleep(500);
+            }
+        }
+        catch(InterruptedException e){
+            // TODO handle it !!
+        }
+
     }
 
     private void openConnectionToDevice(UsbSerialDriver driver) {
@@ -335,6 +361,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             serialPort.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
 
             // TODO has it inited
+            // TODO  requestPermission
             startIoManager(serialPort);
 
             isConnected = true;
