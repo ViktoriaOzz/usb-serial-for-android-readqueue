@@ -1,10 +1,8 @@
 package com.hoho.android.usbserial.unityplugin;
 
-import java.io.IOException;
 import java.util.*;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Executors;
 
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
@@ -15,8 +13,6 @@ import android.graphics.pdf.models.ListItem;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
-import android.os.Handler;
-import android.util.Log;
 
 import androidx.core.content.ContextCompat;
 
