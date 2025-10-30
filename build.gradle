@@ -6,6 +6,11 @@ buildscript {
         google()
     }
     dependencies {
+        fileTree(include: ['*.jar'], dir: 'libs')
+
+
+
+//        project(':UnityClasses')
         classpath 'com.android.tools.build:gradle:8.13.0'
     }
 }

@@ -16,6 +16,7 @@ import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
 import com.hoho.android.usbserial.util.SerialInputOutputManager;
+import com.unity3d.player.UnityPlayer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,17 +41,16 @@ public class SerialPortListener implements com.hoho.android.usbserial.util.Seria
     /// Port Parameters and C# connections
     private UsbSerialProber prober;
     private List<UsbSerialDriver> availableDrivers;
-    // private List<String> availablePortsNames;
-    private static int availablePortCount;
+    //private static int availablePortCount;
+
     // кастомный экшон для фильтра и брокастресивера
     private static final String ACTION_USB_PERMISSION = "com.example.app.USB_PERMISSION";
     private int baudRate = 460800; // передаем из c#
     private int readTimeout = 5; // ms
     private int writeTimeout = 100;
-
+    private static boolean isDebug = true;
     private boolean isConnected = false;
     private int currPortIndex;
-    private List<String> portNames;
 
     /// Data bytes entities
     // буффер для хранения посылок и периодического сгруза их в c# (таймер задается на стороне юнити, не менее 50мс)
@@ -82,9 +82,6 @@ public class SerialPortListener implements com.hoho.android.usbserial.util.Seria
         try{
             // для броадкаст ресиверов
             permissionFilter = new IntentFilter(ACTION_USB_PERMISSION);
-            // получаем сообщения только на разрешения
-            // на подключ\отключ ничего не вылавливаем
-            // ACTION_USB_DEVICE_ATTACHED\ACTION_USB_DEVICE_DETACHED
 // TODO акшоны андроида
 /*
 // Зарядка подключена/отключена
@@ -139,7 +136,8 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             portsCount = availableDrivers.size();
         }
         catch(Exception e){
-            // onRunError(e); // not static so sat
+            // onRunError(e);
+            SendMessageToUnity("Error: " + e.getMessage());
         }
         return portsCount;
     }
@@ -155,29 +153,44 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             for(int i = 0; i<availableDrivers.size(); i++){
                 portNames[i] = availableDrivers.get(i).getDevice().getDeviceName();
             }
-            // TODO debugg port count
+            if(isDebug){
+                SendMessageToUnity("available ports count: " + availableDrivers.size());
+            }
+
+//            StringJoiner joiner = new StringJoiner(",");
+//            list.forEach(item -> joiner.add(item.toString());
+//            joiner.toString();
         } catch (Exception e) {
             // TODO DEBAAAAAAAAAAAAGH
+            SendMessageToUnity("Error: " + e.getMessage());
         }
         return portNames;
     }
 
+    public void SetIsDebug(boolean val){
+        isDebug = val;
+        SendMessageToUnity("new isDebug value: " + isDebug);
+    }
+
     public boolean IsConnected(){
+        SendMessageToUnity("Asking isConnected: " + isConnected);
         return isConnected;
     }
 
     public void SetReadBufferDelay(int delay){
         readTimeout = delay;
+        SendMessageToUnity("readTimeout: " + readTimeout + " ms");
     }
     public int GetReadBufferDelay(){
-        return readTimeout;
+        return 0;// readTimeout;
     }
 
     public int PortIndex() {
         return currPortIndex;
     }
     public String PortName(){
-        return portNames.get(currPortIndex);
+        String[] portNames = GetPortNames(context);
+        return portNames[currPortIndex];
     }
     public int GetBaudRate(){
         return baudRate;
@@ -186,11 +199,11 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
     // write
     public void SendBytes(byte[] bytes){
         if(!isConnected) {
-            // TODO HandleUnityMessage("Cannot write cause of not connected or no serial port");
+            SendMessageToUnity("Cannot write, not connected");
             return;
         }
         if(serialPort == null){
-            // TODO HandleUnityMessage("Cannot write cause of not connected or no serial port");
+            SendMessageToUnity("Cannot write, no serial port");
             return;
         }
 
@@ -200,14 +213,14 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         }
         catch (Exception e)
         {
-            // TODO onRunError(e);
+            onRunError(e);
         }
     }
     // TODO: hz zachem eto
     //void ReadBytes(byte[] bytes);
-    void HandleError(String message){
-        //TODO
-    }
+//    void HandleError(String message){
+//        //TODO
+//    }
 
     // in unity - check if it null or empty
     public byte[] FlushReadBuffer(){
@@ -218,7 +231,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             baos.reset();
         }
         catch (Exception e){
-            // TODO handle
+            onRunError(e);
             result = null;
         }
         finally {
@@ -244,7 +257,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             }
         }
         catch(Exception e){
-            // TODO: handle message
+            onRunError(e);
             return false;
         }
         return true;
@@ -252,11 +265,13 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
 
     public boolean ConnectSerial(int port, int baudRate){
         if(isConnected){
-            // TODO: Handle if already connected
+            SendMessageToUnity("Already connected");
             return false;
         }
         if(usbManager == null){
-            // Handle it
+            // TODO переинициализировать - не выйдет тк final, терпим
+            // usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+            SendMessageToUnity("UsbManager is null");
             return false;
         }
         this.baudRate = baudRate;
@@ -287,7 +302,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             openConnectionToDevice(driver);
         }
         catch(Exception e){
-            // TODO: handle sosality
+            onRunError(e);
             return false;
         }
         return true;
@@ -296,7 +311,6 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
 
     ///====================================== Private methods ======================================
 
-// проверить все ли есть и отдебагать
     private void closeConnectionThread(){
         reentrantLock.lock();
         try{
@@ -305,13 +319,13 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
                     openedConnectionThread.join(500);
                 }
                 catch(InterruptedException e){
-                    // TODO: make it safe and handle
+                    onRunError(e);
                     Thread.currentThread().interrupt();
                 }
                 finally{
                     openedConnectionThread = null;
                 }
-                // TODO: debug if thread stopped suckeggsfully
+                if(isDebug) SendMessageToUnity("Connection thread stopped");
             }
         }
         finally{
@@ -322,7 +336,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
     private void openConnectionThread(UsbDevice device){
         // here we requestin permissions
         if(usbManager == null){
-            // TODO handle
+            if(isDebug) SendMessageToUnity("UsbManager is null");
             return; // no, try again
         }
         if(device == null){
@@ -335,7 +349,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             }
         }
         catch(InterruptedException e){
-            // TODO handle it !!
+            onRunError(e);
         }
 
     }
@@ -343,24 +357,23 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
     private void openConnectionToDevice(UsbSerialDriver driver) {
         // при подключ к конкр драйв
         // usbManager.requestPermission(driver.getDevice(), permissionIntent);
-// TODO CHECK CURR DEVICE
-        // TODO debug HERE status isConnected
+
+        if(isDebug) SendMessageToUnity("CurrentDevice name: " + currentDevice.getDeviceName());
+        if(isDebug) SendMessageToUnity("Trying to connect to certain device. IsConnected: " + isConnected);
         UsbDeviceConnection deviceConnection = usbManager.openDevice(currentDevice);
 
         if (deviceConnection == null) {
             isConnected = false;
-            // TODO debug it
+            if(isDebug) SendMessageToUnity("DeviceConnection is null");
             return;
         }
 
         try {
-
             serialPort = driver.getPorts().get(0);
 
             serialPort.open(deviceConnection);
             serialPort.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
 
-            // TODO has it inited
             // TODO  requestPermission
             startIoManager(serialPort);
 
@@ -368,8 +381,9 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         }
         catch (Exception e) {
             try {
-                // TODO debug it
-                serialPort.close(); //
+                onRunError(e);
+                if(isDebug) SendMessageToUnity("Closing connection");
+                serialPort.close();
             }
             catch (Exception ex) {
                 onRunError(ex);
@@ -418,7 +432,7 @@ private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
                 if(device != null && device.equals(currentDevice)){
                     // public static final String EXTRA_PERMISSION_GRANTED = "permission";
                     if(granted){
-                        // TODO debug that permission granted
+                        if(isDebug) SendMessageToUnity("Extra permission granted");
                         if(isConnected){
                             /// !!
                             DisconnectSerial();
@@ -428,17 +442,18 @@ private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
                         }
                     }
                     else{
-                        // TODO debug that permission denied
+                        if(isDebug) SendMessageToUnity("Extra permission denied");
                     }
                 }
                 else{
 // TODO device should be initialized and correct
+                    if(isDebug) SendMessageToUnity("The device must be initialized and correct");
                 }
 
             }
         }
         catch(Exception e){
-            // TODO
+            onRunError(e);
         }
     }
 
@@ -447,14 +462,18 @@ private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
 private void registerReceiver(){
     if(usbReceiver == null){
         // TODO jopa
+        if(isDebug) SendMessageToUnity("UsbReceiver is null");
         // add actions, or no messages will be able to attachment
     }
     if(!isUsbReceiverRegistered){
         ContextCompat.registerReceiver(context, usbReceiver, permissionFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
+        return;
     }
+    if(isDebug) SendMessageToUnity("UsbReceiver somehow already registered");
 }
 
 private void unregisterUsbReceiver(){
+    if(isDebug) SendMessageToUnity("Unregister usbReceiver");
     context.unregisterReceiver(usbReceiver);
 }
 
@@ -477,6 +496,14 @@ private void unregisterUsbReceiver(){
 
     @Override
     public void onRunError(Exception e) {
-        // TODO: broadcast receiver to hrunity
+        String errorMsg = "Error: " + e.getMessage();
+        SendMessageToUnity(errorMsg);
     }
+
+///====================================== Unity logger ======================================
+
+    private static void SendMessageToUnity(String msg){
+        UnityPlayer.UnitySendMessage("Script_SerialProxy", "OnBroadcastReceived", msg);
+    }
+
 }

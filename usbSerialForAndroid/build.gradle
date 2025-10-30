@@ -1,14 +1,13 @@
 plugins {
     id 'com.android.library'
-    id 'maven-publish'
 }
 
 android {
-    compileSdkVersion 34
+    compileSdkVersion 36
 
     defaultConfig {
         minSdkVersion 17
-        targetSdkVersion 34
+        targetSdkVersion 36
         consumerProguardFiles 'proguard-rules.pro'
         
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
@@ -22,12 +21,6 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
     namespace 'com.hoho.android.usbserial'
-    publishing {
-        // if coverage is enabled, change 'release' to 'anyDeviceRelease' or comment out publishing rule
-        singleVariant('release') {
-            withSourcesJar()
-        }
-    }
 }
 
 dependencies {
@@ -40,22 +33,6 @@ dependencies {
     androidTestImplementation 'androidx.test:runner:1.5.2' // later versions have minsdk 19
     androidTestImplementation 'commons-net:commons-net:3.9.0' // later versions fail on old Android devices with missing java.time.Duration class
     androidTestImplementation 'org.apache.commons:commons-lang3:3.14.0'
+
+    compileOnly(files("libs/classes.jar"))
 }
-
-// gradle task: publishToMavenLocal
-project.afterEvaluate {
-    publishing {
-        publications {
-            release(MavenPublication) {
-                from components.release
-
-                // values used for local maven repo, jitpack uses github release:
-                groupId 'com.github.mik3y'
-                artifactId 'usb-serial-for-android'
-                version '3.8.0beta'
-            }
-        }
-    }
-}
-
-//apply from: 'coverage.gradle'
