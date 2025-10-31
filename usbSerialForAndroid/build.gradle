@@ -16,6 +16,10 @@ android {
                 'rfc2217_server_nonstandard_baudrates': 'true',   // true    false     false
         ]
     }
+
+    // compileOptions.encoding = 'UTF-8'
+    compileOptions.encoding = 'windows-1251'
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8

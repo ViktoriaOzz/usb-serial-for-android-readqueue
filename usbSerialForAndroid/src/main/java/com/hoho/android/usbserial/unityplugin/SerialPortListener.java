@@ -108,6 +108,8 @@ filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
 filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
 */
 
+
+
             // context.registerReceiver(usbReceiver, filter);
             //  registerReceiver(usbReceiver, new IntentFilter(INTENT_ACTION_GRANT_USB));
             // TODO: end it
@@ -160,7 +162,6 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
 //            list.forEach(item -> joiner.add(item.toString());
 //            joiner.toString();
         } catch (Exception e) {
-            // TODO DEBAAAAAAAAAAAAGH
             SendMessageToUnity("ERROR: " + e.getMessage()); // this method static
         }
         return portNames;
@@ -220,7 +221,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
     public void SetBaudRate(int val) {
         if(val < 0) baudRate = 600;
         else baudRate = val;
-        SendDebugMessageToUnity("Currend BaudRate is: " + baudRate);
+        SendDebugMessageToUnity("Current BaudRate is: " + baudRate);
     }
 
     // write
@@ -280,7 +281,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             }
 
             if(usbReceiver != null){
-                // unregisterReceiver(permissionReceiver);
+                unregisterUsbReceiver();
             }
         }
         catch(Exception e){
@@ -292,15 +293,22 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
 
     public boolean ConnectSerial(int port, int baudRate){
         if(isConnected){
+            // а в тот же драйвер или нет
             SendDebugMessageToUnity("Already connected");
             return false;
         }
         if(usbManager == null){
-            // TODO переинициализировать - не выйдет тк final, терпим
+            /// переинициализировать - не выйдет тк final, терпим
+        //
             // usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
             SendDebugMessageToUnity("UsbManager is null");
             return false;
         }
+
+        if(usbReceiver != null){
+            registerUsbReceiver();
+        }
+
 
         SetBaudRate(baudRate);
         //this.baudRate = baudRate;
@@ -339,17 +347,16 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         return true;
     }
 
-
 ///====================================== The loopa ======================================
 
-    private void StartTransferToUnity(){
-
-        // starts thread when fully connected
-        while(isConnected){
-
-        }
-
-    }
+//    private void StartTransferToUnity(){
+//
+//        // starts thread when fully connected
+//        while(isConnected){
+//
+//        }
+//
+//    }
 
 /// ====================================== Private methods ======================================
 
@@ -460,36 +467,41 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
 // awakes on requesting permission (loopa in createConnectionThread) with ACTION_USB_PERMISSION
 // permission intent
 // usbManager.requestPermission(device, permissionIntent);
-        private boolean isUsbReceiverRegistered = false;
+private boolean isUsbReceiverRegistered = false;
 private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
     @Override
     public void onReceive(Context context, Intent intent) {
 // не нужна тут синхронизация, onReceive вызывается только в главном потоке
         try{
             if (ACTION_USB_PERMISSION.equals(intent.getAction())) {
+
+                // handle permission
                 UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-                boolean granted = intent.getBooleanExtra(usbManager.EXTRA_PERMISSION_GRANTED, false);
+                boolean granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
 
 // проверяем что это то же устройство, для которого запрашивали разрешение
-                if(device != null && device.equals(currentDevice)){
+                if(device != null && device.equals(currentDevice /* != null*/ /*curr device is always true*/)){
+
                     // public static final String EXTRA_PERMISSION_GRANTED = "permission";
                     if(granted){
-                        SendDebugMessageToUnity("Extra permission granted");
+                        SendDebugMessageToUnity("[UsbReceiver] Extra permission granted for device");
                         if(isConnected){
-                            /// !!
-                            DisconnectSerial();
+                            SendDebugMessageToUnity("[UsbReceiver] Already connected? so ignoring granted permission");
+                            // DisconnectSerial(); // там вызывается анрегистер ресивера внутри самого ресивера
                         }
                         else{
+                            SendDebugMessageToUnity("[UsbReceiver] Able to connect to device");
                             openConnectionToDevice(availableDrivers.get(currPortIndex));
                         }
                     }
                     else{
-                        SendDebugMessageToUnity("Extra permission denied");
+                        SendDebugMessageToUnity("[UsbReceiver] Extra permission denied");
                     }
+
+
                 }
                 else{
-// TODO device should be initialized and correct
-                    SendDebugMessageToUnity("The device must be initialized and correct");
+                    SendDebugMessageToUnity("[UsbReceiver] The device must be initialized and correct");
                 }
 
             }
@@ -501,22 +513,27 @@ private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
 
 };
 
-private void registerReceiver(){
+private void registerUsbReceiver(){
     if(usbReceiver == null){
-        // TODO jopa
         SendDebugMessageToUnity("UsbReceiver is null");
-        // add actions, or no messages will be able to attachment
+        // add actions ? , or no messages will be able to attachment
+        return;
     }
     if(!isUsbReceiverRegistered){
         ContextCompat.registerReceiver(context, usbReceiver, permissionFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
+        SendDebugMessageToUnity("UsbReceiver registered");
+        isUsbReceiverRegistered = true;
         return;
     }
-    SendDebugMessageToUnity("UsbReceiver somehow already registered");
+    SendDebugMessageToUnity("UsbReceiver somehow was already registered");
 }
 
 private void unregisterUsbReceiver(){
-    SendDebugMessageToUnity("Unregister usbReceiver");
-    context.unregisterReceiver(usbReceiver);
+    if(isUsbReceiverRegistered && usbReceiver != null){
+        isUsbReceiverRegistered = false;
+        SendDebugMessageToUnity("UsbReceiver unregistered");
+        context.unregisterReceiver(usbReceiver);
+    }
 }
 
 
@@ -526,10 +543,10 @@ private void unregisterUsbReceiver(){
     public void onNewData(byte[] data) {
         reentrantLock.lock();
         try{
-            baos.write(data,/*оффсет в принмаемом массиве*/ 0, data.length);
+            baos.write(data,/*оффсет в принимаемом массиве*/ 0, data.length);
         }
         catch(Exception e){
-            // TODO: handle exception
+            onRunError(e);
         }
         finally {
             reentrantLock.unlock();
@@ -545,11 +562,11 @@ private void unregisterUsbReceiver(){
 ///====================================== Unity logger ======================================
 
     private static void SendMessageToUnity(String msg){
-        UnityPlayer.UnitySendMessage("Script_SerialProxy", "OnBroadcastReceived", msg);
+        UnityPlayer.UnitySendMessage("Script_UAndReceive", "OnBroadcastReceived", msg);
     }
 
     private static void SendDebugMessageToUnity(String msg){
-        if(isDebug) UnityPlayer.UnitySendMessage("Script_SerialProxy", "OnBroadcastReceived", msg);
+        if(isDebug) UnityPlayer.UnitySendMessage("Script_UAndReceive", "OnBroadcastReceived", msg);
     }
 
 }
