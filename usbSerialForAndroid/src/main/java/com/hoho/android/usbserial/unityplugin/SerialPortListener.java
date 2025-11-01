@@ -173,7 +173,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
     }
 
     public boolean IsConnected(){
-        SendDebugMessageToUnity("Asking isConnected: " + isConnected);
+        // SendDebugMessageToUnity("Asking isConnected: " + isConnected);
         return isConnected;
     }
 
@@ -563,6 +563,7 @@ private void unregisterUsbReceiver(){
 
     private static void SendMessageToUnity(String msg){
         UnityPlayer.UnitySendMessage("Script_UAndReceive", "OnBroadcastReceived", msg);
+        // Base64.encodeToString(data, Base64.DEFAULT)); // если надо будет отправлять байты
     }
 
     private static void SendDebugMessageToUnity(String msg){
