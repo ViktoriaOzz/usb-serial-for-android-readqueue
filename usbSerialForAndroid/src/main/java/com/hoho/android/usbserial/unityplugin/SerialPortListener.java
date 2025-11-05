@@ -299,6 +299,9 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             SendDebugMessageToUnity("Already connected");
             return false;
         }
+        else{
+            SendDebugMessageToUnity("There is no connection yet");
+        }
         if(usbManager == null){
             /// переинициализировать - не выйдет тк final, терпим
         //
@@ -306,9 +309,20 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             SendDebugMessageToUnity("UsbManager is null");
             return false;
         }
+        else{
+            SendDebugMessageToUnity("UsbManager exists");
+        }
 
         if(usbReceiver != null){
-            registerUsbReceiver();
+            try{
+                registerUsbReceiver();
+            }
+            catch(Exception e){
+                onRunError(e);
+            }
+        }
+        else{
+            SendDebugMessageToUnity("UsbReceiver is null!!! Achtung!!");
         }
 
 
@@ -317,22 +331,25 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
 
         /// check if port num correct
         currPortIndex = port;
-
         availableDrivers = GetAvailableDrivers();
-        UsbSerialDriver driver = availableDrivers.get(port);
-        // driver.getDevice().equals(device)
-        currentDevice = driver.getDevice();
 
-        /// Try to close connect thread
-        reentrantLock.lock();
-        try{
+        try {
+            UsbSerialDriver driver = availableDrivers.get(port);
+            // driver.getDevice().equals(device)
+            currentDevice = driver.getDevice();
+
+            /// Try to close connect thread
+            reentrantLock.lock();
             try{
                 if(isThreadRunning.compareAndSet(true, false))
                     closeConnectionThread();
-                // TODO clear close connection !!!
+
                 if(isThreadRunning.compareAndSet(false, true)){
+                    /// TODO open connection !!
                     openConnectionThread(currentDevice);
                 }
+            } catch (Exception e) {
+                onRunError(e);
             }
             finally{
                 reentrantLock.unlock();
@@ -341,6 +358,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             // start thread with loopa - achieve permission
 
             openConnectionToDevice(driver);
+
         }
         catch(Exception e){
             onRunError(e);
@@ -459,9 +477,15 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
     }
 
     private List<UsbSerialDriver> GetAvailableDrivers(){
-        availableDrivers.clear();
-        availableDrivers = prober.findAllDrivers(usbManager);
-        return availableDrivers;
+        try{
+            availableDrivers.clear();
+            availableDrivers = prober.findAllDrivers(usbManager);
+            return availableDrivers;
+        }
+        catch(Exception e){
+            onRunError(e);
+            return availableDrivers;
+        }
     }
 
 
