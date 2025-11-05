@@ -8,11 +8,13 @@ buildscript {
     dependencies {
         fileTree(include: ['*.jar'], dir: 'libs')
 
-        classpath 'com.android.tools.build:gradle:8.8.0'
+        // classpath 'com.android.tools.build:gradle:8.8.0'
+        // classpath 'com.android.tools.build:gradle:8.13.0'
+        classpath 'com.android.tools.build:gradle:7.4.2' // -- AGP !!
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10"
 
 //        project(':UnityClasses')
-        classpath 'com.android.tools.build:gradle:8.13.0'
+        // classpath 'com.android.tools.build:gradle:8.13.0'
     }
 }
 

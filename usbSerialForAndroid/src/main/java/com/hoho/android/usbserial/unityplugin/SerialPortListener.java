@@ -190,6 +190,8 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
     }
 
     public void SetReadTimeout(int delay){
+        if(delay < 5) readTimeout = 5;
+        if(delay < readBufferDelay) readTimeout = readBufferDelay;
         readTimeout = delay;
         SendDebugMessageToUnity("readTimeout: " + readTimeout + " ms");
     }
