@@ -62,7 +62,7 @@ public class SerialPortListener implements com.hoho.android.usbserial.util.Seria
     private final ReentrantLock reentrantLock = new ReentrantLock();
     private final Object lockObj = new Object();
     private final AtomicBoolean isThreadRunning = new AtomicBoolean(false);
-    private final AtomicBoolean shouldStop = new AtomicBoolean(false);
+    private final AtomicBoolean isPermissionGranted = new AtomicBoolean(false);
 
     /// Broadcast Receivers...
 
@@ -209,7 +209,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         return writeTimeout;// readTimeout;
     }
 
-    public int PortIndex() {
+    public int GetPortIndex() {
         return currPortIndex;
     }
     public String PortName(){
@@ -273,7 +273,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
     public boolean DisconnectSerial() {
         try{
             if(isConnected){
-                ///  Close the thread
+                ///  Close the thread - ?? !!
                 closeConnectionThread();
 
                 stopIoManager();
@@ -281,10 +281,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
 
                 isConnected = false;
             }
-
-            if(usbReceiver != null){
-                unregisterUsbReceiver();
-            }
+            unregisterUsbReceiver();
         }
         catch(Exception e){
             onRunError(e);
@@ -304,7 +301,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         }
         if(usbManager == null){
             /// переинициализировать - не выйдет тк final, терпим
-        //
+            ///  непонятно что делать при onDestroy в unity
             // usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
             SendDebugMessageToUnity("UsbManager is null");
             return false;
@@ -313,58 +310,56 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
             SendDebugMessageToUnity("UsbManager exists");
         }
 
-        if(usbReceiver != null){
-            try{
-                registerUsbReceiver();
-            }
-            catch(Exception e){
-                onRunError(e);
-            }
-        }
-        else{
-            SendDebugMessageToUnity("UsbReceiver is null!!! Achtung!!");
-        }
-
-
         SetBaudRate(baudRate);
-        //this.baudRate = baudRate;
-
-        /// check if port num correct
-        currPortIndex = port;
-        availableDrivers = GetAvailableDrivers();
-
         try {
+            availableDrivers = GetAvailableDrivers();
+            SendDebugMessageToUnity("check drivers count: " + availableDrivers.size()); // stupid debug
+            if(port > availableDrivers.size() || port <= 0){
+                SendDebugMessageToUnity("Input correct port index");
+                return false;
+            }
+            currPortIndex = port;
+
             UsbSerialDriver driver = availableDrivers.get(port);
             // driver.getDevice().equals(device)
-            currentDevice = driver.getDevice();
 
             /// Try to close connect thread
-            reentrantLock.lock();
-            try{
-                if(isThreadRunning.compareAndSet(true, false))
-                    closeConnectionThread();
+            //reentrantLock.lock();
+            synchronized (this){
+                currentDevice = driver.getDevice();
 
-                if(isThreadRunning.compareAndSet(false, true)){
-                    /// TODO open connection !!
-                    openConnectionThread(currentDevice);
+                // до реквеста пермишна, должен быть уже назначен currentDevice
+                registerUsbReceiver();
+
+                if(isThreadRunning.compareAndSet(true, false)){
+                    SendDebugMessageToUnity("Waiting to 1 second for closing read thread");
+                    closeConnectionThread();
                 }
-            } catch (Exception e) {
-                onRunError(e);
+
+                // if(isThreadRunning.compareAndSet(false, true)){
+                if(!isThreadRunning.get()){
+                    // TODO async
+                    openConnectionThreadThruPermission(currentDevice, driver);
+                    isThreadRunning.set(true);
+                }
+                //  openConnectionToDevice(driver);
             }
-            finally{
-                reentrantLock.unlock();
-            }
+
+                isConnected = true;
+                return true;
+
+//            finally{
+//                reentrantLock.unlock();
+//            }
             ///  there re opening of thread
             // start thread with loopa - achieve permission
 
-            openConnectionToDevice(driver);
-
         }
         catch(Exception e){
+            isConnected = false;
             onRunError(e);
             return false;
         }
-        return true;
     }
 
 ///====================================== The loopa ======================================
@@ -380,47 +375,57 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
 
 /// ====================================== Private methods ======================================
 
-    private void closeConnectionThread(){
+    private boolean requestPermissionBeforeLoopa(UsbSerialDriver driver){
+        if(usbManager.hasPermission(currentDevice)){
+            openConnectionToDevice(driver);
+            return true;
+        }
+        usbManager.requestPermission(currentDevice, permissionPendingIntent);
+        return false;
+    }
+
+    // async enough
+    private /*synchronized*/ void openConnectionThreadThruPermission(UsbDevice device, UsbSerialDriver driver){
+        // here we requestin permissions
         reentrantLock.lock();
         try{
-            if(openedConnectionThread != null && isThreadRunning.compareAndSet(true, false)){
-                try{
-                    openedConnectionThread.join(500);
-                }
-                catch(InterruptedException e){
-                    onRunError(e);
-                    Thread.currentThread().interrupt();
-                }
-                finally{
-                    openedConnectionThread = null;
-                }
-                SendDebugMessageToUnity("Connection thread stopped");
+            // closeConnectionThread();
+            if(usbManager == null){
+                SendDebugMessageToUnity("UsbManager is null");
+                //return; // no, try again
+                Thread.sleep(100);
+                // openConnectionThreadThruPermission(device);
             }
+            if(device == null){
+                SendDebugMessageToUnity("UsbManager is null");
+                // Thread.sleep(100);
+                // openConnectionThreadThruPermission(device);
+            }
+
+//            while(!(usbManager.hasPermission(device))){
+////                PendingIntent.getBroadcast(context, 0,
+////                        new Intent(ACTION_USB_PERMISSION) /*INTENT_ACTION_GRANT_USB*/, PendingIntent.FLAG_IMMUTABLE)
+//                usbManager.requestPermission(device, permissionPendingIntent);
+//                SendDebugMessageToUnity("Waiting for permission with usbManager...");
+//                Thread.sleep(100);
+//            }
+            // may generate nullptr
+            if(!usbManager.hasPermission(device)){
+                usbManager.requestPermission(device, permissionPendingIntent);
+                SendDebugMessageToUnity("Requesting permission with usbManager...");
+                return;
+            }
+            // запуск нового треда
+            openedConnectionThread = new Thread(() -> openConnectionToDevice(driver));
+            openedConnectionThread.start();
+//            openConnectionToDevice(driver);
+        }
+        catch(Exception e){
+            onRunError(e);
         }
         finally{
             reentrantLock.unlock();
         }
-    }
-
-    private void openConnectionThread(UsbDevice device){
-        // here we requestin permissions
-        if(usbManager == null){
-            SendDebugMessageToUnity("UsbManager is null");
-            return; // no, try again
-        }
-        if(device == null){
-            return;
-        }
-        try{
-            while(!(usbManager.hasPermission(device))){
-                usbManager.requestPermission(device, permissionPendingIntent);
-                Thread.sleep(500);
-            }
-        }
-        catch(InterruptedException e){
-            onRunError(e);
-        }
-
     }
 
     private void openConnectionToDevice(UsbSerialDriver driver) {
@@ -429,7 +434,8 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
 
         SendDebugMessageToUnity("CurrentDevice name: " + currentDevice.getDeviceName());
         SendDebugMessageToUnity("Trying to connect to certain device. IsConnected: " + isConnected);
-        UsbDeviceConnection deviceConnection = usbManager.openDevice(currentDevice);
+
+        UsbDeviceConnection deviceConnection = usbManager.openDevice(currentDevice);// не сработает без получения permission
 
         if (deviceConnection == null) {
             isConnected = false;
@@ -439,18 +445,23 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
 
         try {
             serialPort = driver.getPorts().get(0);
-
             serialPort.open(deviceConnection);
             serialPort.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
-
-            // TODO  requestPermission
             startIoManager(serialPort);
-
             isConnected = true;
+            SendDebugMessageToUnity("Connection thread is opened");
+
+            while(!Thread.currentThread().isInterrupted()){
+                continue;
+            }
+
         }
         catch (Exception e) {
+            onRunError(e);
+        }
+        finally{
             try {
-                onRunError(e);
+                isConnected = false;
                 SendDebugMessageToUnity("Closing connection");
                 serialPort.close();
             }
@@ -476,6 +487,35 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         }
     }
 
+    private synchronized void closeConnectionThread(){
+        ///  mode flag ??
+        // reentrantLock.lock();
+        try{
+            if(openedConnectionThread != null && isThreadRunning.get()){
+                try{
+                    openedConnectionThread.join(1000);
+                }
+                catch(InterruptedException e){
+                    onRunError(e);
+                    SendDebugMessageToUnity("Try interrupt thread..");
+                    // Thread.currentThread().interrupt();
+                    openedConnectionThread.interrupt();
+                }
+                finally{
+                    openedConnectionThread = null;
+                }
+                SendDebugMessageToUnity("Connection thread stopped");
+                isThreadRunning.set(false);
+            }
+        }
+        catch(Exception e){
+            onRunError(e);
+        }
+//        finally{
+//            reentrantLock.unlock();
+//        }
+    }
+
     private List<UsbSerialDriver> GetAvailableDrivers(){
         try{
             availableDrivers.clear();
@@ -488,12 +528,13 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         }
     }
 
-
 ///====================================== Broadcast receiver ======================================
 // awakes on requesting permission (loopa in createConnectionThread) with ACTION_USB_PERMISSION
 // permission intent
 // usbManager.requestPermission(device, permissionIntent);
-private boolean isUsbReceiverRegistered = false;
+// private boolean isUsbReceiverRegistered = false;
+private AtomicBoolean isUsbReceiverRegistered = new AtomicBoolean(false);
+// создаем этот экземпл ресивера один раз и не занулляем
 private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -509,22 +550,32 @@ private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
                 if(device != null && device.equals(currentDevice /* != null*/ /*curr device is always true*/)){
 
                     // public static final String EXTRA_PERMISSION_GRANTED = "permission";
-                    if(granted){
+                    if(granted && !isConnected){
+                        isPermissionGranted.set(true);
                         SendDebugMessageToUnity("[UsbReceiver] Extra permission granted for device");
-                        if(isConnected){
-                            SendDebugMessageToUnity("[UsbReceiver] Already connected? so ignoring granted permission");
-                            // DisconnectSerial(); // там вызывается анрегистер ресивера внутри самого ресивера
-                        }
-                        else{
-                            SendDebugMessageToUnity("[UsbReceiver] Able to connect to device");
-                            openConnectionToDevice(availableDrivers.get(currPortIndex));
-                        }
+                            // передам сюда драйвер с главного потока, он не нулл
+//                         UsbSerialDriver driver = availableDrivers.get(currPortIndex);
+//                        new Thread( () -> {
+//                            openConnectionToDevice(driver);
+//                        }).start();
+
+//                        if(isConnected){
+//                            SendDebugMessageToUnity("[UsbReceiver] Already connected? so ignoring granted permission");
+//                            // DisconnectSerial(); // там вызывается анрегистер ресивера внутри самого ресивера
+//                        }
+//                        else{
+//                            SendDebugMessageToUnity("[UsbReceiver] Able to connect to device");
+//                            openConnectionToDevice(availableDrivers.get(currPortIndex));
+//                        }
                     }
                     else{
-                        SendDebugMessageToUnity("[UsbReceiver] Extra permission denied");
+                        if(!granted){
+                            SendDebugMessageToUnity("[UsbReceiver] Extra permission denied");
+                            isPermissionGranted.set(false);
+                        }
+                        if(isConnected)
+                            SendDebugMessageToUnity("Somehow already connected");
                     }
-
-
                 }
                 else{
                     SendDebugMessageToUnity("[UsbReceiver] The device must be initialized and correct");
@@ -533,6 +584,7 @@ private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
             }
         }
         catch(Exception e){
+            SendMessageToUnity("Error during receiving permission broadcast");
             onRunError(e);
         }
     }
@@ -542,24 +594,37 @@ private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
 private void registerUsbReceiver(){
     if(usbReceiver == null){
         SendDebugMessageToUnity("UsbReceiver is null");
-        // add actions ? , or no messages will be able to attachment
         return;
     }
-    if(!isUsbReceiverRegistered){
-        ContextCompat.registerReceiver(context, usbReceiver, permissionFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
-        SendDebugMessageToUnity("UsbReceiver registered");
-        isUsbReceiverRegistered = true;
-        return;
+
+    try {
+        if(isUsbReceiverRegistered.compareAndSet(false, true)){
+            ContextCompat.registerReceiver(context, usbReceiver, permissionFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
+            SendDebugMessageToUnity("UsbReceiver registered");
+//            isUsbReceiverRegistered = true;
+            return;
+        }
+        SendDebugMessageToUnity("UsbReceiver somehow was already registered");
     }
-    SendDebugMessageToUnity("UsbReceiver somehow was already registered");
+    catch(Exception e){
+//        isUsbReceiverRegistered = false;
+        isUsbReceiverRegistered.set(false);
+        onRunError(e);
+    }
 }
 
 private void unregisterUsbReceiver(){
-    if(isUsbReceiverRegistered && usbReceiver != null){
-        isUsbReceiverRegistered = false;
-        SendDebugMessageToUnity("UsbReceiver unregistered");
-        context.unregisterReceiver(usbReceiver);
-    }
+    //if(isUsbReceiverRegistered.compareAndSet(true, false) && usbReceiver != null){ // отписываемся без проверок любой ценой, но бесплатно
+        isUsbReceiverRegistered.set(false);
+        try{
+            context.unregisterReceiver(usbReceiver);
+            SendDebugMessageToUnity("UsbReceiver unregistered");
+        }
+        catch(Exception e){
+            // isUsbReceiverRegistered.set();
+            onRunError(e);
+        }
+    //}
 }
 
 
