@@ -8,6 +8,7 @@ import android.app.PendingIntent;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
+import android.util.Base64;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -20,15 +21,17 @@ import com.hoho.android.usbserial.util.SerialInputOutputManager;
 
 import com.unity3d.player.UnityPlayer;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+// import java.xml.bind;
+
 
 import java.io.ByteArrayOutputStream;
 
-// same interface as in android
 public class SerialPortListener implements com.hoho.android.usbserial.util.SerialInputOutputManager.Listener{
 
     /// Android entities, initialize from constructor
@@ -272,6 +275,22 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         try{
             result = baos.toByteArray();
             baos.reset();
+            SendDebugMessageToUnity("Baos just flushed!");
+
+            if(isDebug){
+                int debugLen  = 15;
+                if(15 > result.length) debugLen = result.length;
+                SendDebugMessageToUnity("DebugLen:"  + debugLen);
+
+                byte[] debug = new byte[debugLen];
+                debug = Arrays.copyOfRange(result, 0, debugLen);
+                // char[] debugStr = new char[debugLen];
+
+                String debugS = Base64.encodeToString(debug, Base64.DEFAULT);
+
+                SendDebugMessageToUnity("debug bytes: " + debugS);
+            }
+
         }
         catch (Exception e){
             onRunError(e);
@@ -287,7 +306,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         try{
             if(isConnected){
                 SendMessageToUnity("Flag connection is true, start disconnection");
-                ///  Close the thread - ?? !!
+
                 closeConnectionThread();
 
                 stopIoManager();
@@ -367,7 +386,7 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
                 }
                 //  openConnectionToDevice(driver);
             }
-                SendMessageToUnity("");
+                SendDebugMessageToUnity("Fully ended connect procedure");
                 isConnected = true;
                 return true;
 
@@ -480,13 +499,17 @@ filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
     }
 
     private void startIoManager(UsbSerialPort port) {
-        // ioManager (port, Listener)
-        stopIoManager();
-        // listener - AndroidJavaProxy !!
-        ioManager = new SerialInputOutputManager(serialPort, this);
-        ioManager.start();
-        // finally can read
-        // Executors.newSingleThreadExecutor().submit((Runnable) ioManager);
+        try{
+            stopIoManager();
+            // listener - AndroidJavaProxy !!
+            ioManager = new SerialInputOutputManager(serialPort, this);
+            ioManager.start();
+            // finally can read
+            // Executors.newSingleThreadExecutor().submit((Runnable) ioManager);
+        }
+        catch(Exception e){
+            onRunError(e);
+        }
     }
 
     private void stopIoManager() {
@@ -640,7 +663,7 @@ private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
 //}
 //
 //private void unregisterUsbReceiver(){
-//    //if(isUsbReceiverRegistered.compareAndSet(true, false) && usbReceiver != null){ // отписываемся без проверок любой ценой, но бесплатно
+//    //if(isUsbReceiverRegistered.compareAndSet(true, false) && usbReceiver != null){
 //        if(isUsbReceiverRegistered.compareAndSet(true,false)){
 //            try{
 //                context.unregisterReceiver(usbReceiver);
@@ -661,7 +684,7 @@ private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
 
     @Override
     public void onNewData(byte[] data) {
-        SendMessageToUnity("onNeweData entrance !");
+        SendDebugMessageToUnity("onNeweData entrance !");
 
         reentrantLock.lock();
         try{
