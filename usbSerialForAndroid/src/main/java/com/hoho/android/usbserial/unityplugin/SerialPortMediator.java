@@ -66,8 +66,9 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 
 ///====================================== Constructor ======================================
 
-    public SerialPortMediator(Context unityActivity){
+    public SerialPortMediator(Context unityActivity, IUnityBufferFetcher fetcher){
         this.unityContext = unityActivity;
+        this.unityFetcher = fetcher;
         DebugUnity("Constructed");
     }
 
@@ -81,17 +82,25 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 //        });
 //        initThread.start();
 
-        CompletableFuture.runAsync(() -> {
-            InitializeSerial();
-            DebugUnity("Current Thread: " + Thread.currentThread());
-        });
+        try{
+            CompletableFuture.runAsync(() -> {
+                InitializeSerial();
+                DebugUnity("Current Thread: " + Thread.currentThread());
+            });
 
-        if(usbManager == null){
-            DebugUnity("usbManager == null");
+            if(usbManager == null){
+                DebugUnity("usbManager == null");
+                return false;
+            }
+
+            return true;
+        }
+        catch(Exception e){
+            Log.e("SERIAL PORT ERROR", "CONNECT BY NUMER" + e.getMessage());
+            DebugUnity("Error during TryConnect: " + e.getMessage());
+            onRunError(e);
             return false;
         }
-
-        return true;
     }
 
     public void CleanupConnection(Context context){
@@ -117,7 +126,8 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
             }
             if(permissionReceiver != null){
                 try{
-                    context.unregisterReceiver(permissionReceiver);
+                    // context.unregisterReceiver(permissionReceiver);
+                    unityContext.unregisterReceiver(permissionReceiver);
                 }
                 catch(Exception e){
                     // skip
@@ -158,14 +168,10 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 
     // put proxy
     public void ConnectByNumer(int num){
-        this.unity = unity;
-        if(this.unity == null){
-            DebugUnity("UnityListener is null");
-            return;
-        }
-        if(availableDrivers != null){
-            driver = availableDrivers.get(num);
-            usbDevice = driver.getDevice();
+        try{
+            if(availableDrivers != null){
+                driver = availableDrivers.get(num);
+                usbDevice = driver.getDevice();
 
 //            Thread connectSerial = new Thread(() ->{
 //                DebugUnity("Current Thread: " + Thread.currentThread());
@@ -173,15 +179,20 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 //            });
 //            connectSerial.start();
 
-            CompletableFuture.runAsync(() ->{
-                DebugUnity("Current Thread: " + Thread.currentThread());
-                ConnectSerial();
-            });
+                CompletableFuture.runAsync(() ->{
+                    DebugUnity("Current Thread: " + Thread.currentThread());
+                    ConnectSerial();
+                });
 
-            ConnectToDevice(driver);
+                ConnectToDevice(driver);
+            }
+            else{
+                DebugUnity("Serial is not initialized yet");
+            }
         }
-        else{
-            DebugUnity("Serial is not initialized yet");
+        catch(Exception e){
+            Log.e("SERIAL PORT ERROR", "CONNECT BY NUMER" + e.getMessage());
+            onRunError(e);
         }
     }
 
@@ -198,7 +209,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
                 DebugUnity("No serial driver available");
             }
             else{
-
+                DebugUnity("Serial driver available");
             }
         }
         catch (Exception e) {
@@ -215,11 +226,14 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
             }
             while(!usbManager.hasPermission(usbDevice)){
                 RequestUsbPermission();
+                DebugUnity("Asking permission in cycle");
+                Thread.sleep(1000);
                 // yield return new WaitForSeconds(1);
             }
         }
         catch (Exception e) {
-            // skip
+            Log.e("SERIAL PORT ERROR", "CONNECT SERIAL" + e.getMessage());
+            onRunError(e);
         }
     }
 
@@ -257,6 +271,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
             DebugUnity("USB connection established");
         }
         catch(Exception e){
+            Log.e("SERIAL PORT ERROR", "SHEEET" + e.getMessage());
             onRunError(e);
         }
     }
@@ -277,9 +292,25 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
             return;
         }
         if(isDeviceConnected){
-            loopThread = new Thread(() -> {
+//            loopThread = new Thread(() -> {
+//                try{
+//                    DebugUnity("Start flushing loop");
+            DebugUnity("Current Thread: " + Thread.currentThread());
+//                    FlushLoopa();
+//                }
+//                catch (InterruptedException e) {
+//                    DebugUnity("InterruptedException during flushing data");
+//                    onRunError(e);
+//                }
+//            });
+//            loopThread.start();
+
+
+            //not another thread but async
+            CompletableFuture.runAsync(() ->{
                 try{
                     DebugUnity("Start flushing loop");
+                    DebugUnity("Current Thread: " + Thread.currentThread());
                     FlushLoopa();
                 }
                 catch (InterruptedException e) {
@@ -287,7 +318,8 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
                     onRunError(e);
                 }
             });
-            loopThread.start();
+
+
         }
 
         // CompletableFuture.delayedExecutor
@@ -336,43 +368,43 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 
 ///====================================== Detach Receiver ======================================
 
-public static class DetachReceiver extends BroadcastReceiver{
-
-    SerialPortMediator mediatorInstance;
-
-    public DetachReceiver(SerialPortMediator a){
-        mediatorInstance = a;
-    }
-
-    @Override
-    public void onReceive(Context context, Intent intent) {
-        Toast.makeText(context, "received detach", Toast.LENGTH_LONG).show();
-        try {
-            if(intent.getAction().equals(UsbManager.ACTION_USB_DEVICE_DETACHED)){
-                if(mediatorInstance != null){
-                    mediatorInstance.DebugUnity("Usb detached");
-                    if(mediatorInstance.isDeviceConnected)
-                        if(mediatorInstance.unityContext.equals(context)){
-                            mediatorInstance.DebugUnity("contecsts equals");
-                            mediatorInstance.CleanupConnection(context);
-                        }
-                        else{
-                            mediatorInstance.DebugUnity("contecsts not equals");
-                            mediatorInstance.CleanupConnection(mediatorInstance.unityContext);
-                        }
-                }
-
-            }
-        } catch (Exception e) {
-            Toast.makeText(context, e.getMessage(), Toast.LENGTH_LONG).show();
-            Log.e("[SERIALPORTLIB]", e.getMessage(), e);
-            //throw new RuntimeException(e);
-        }
-    }
-}
-
-
-    public DetachReceiver receiver = new DetachReceiver(this);
+//public static class DetachReceiver extends BroadcastReceiver{
+//
+//    SerialPortMediator mediatorInstance;
+//
+//    public DetachReceiver(SerialPortMediator a){
+//        mediatorInstance = a;
+//    }
+//
+//    @Override
+//    public void onReceive(Context context, Intent intent) {
+//        Toast.makeText(context, "received detach", Toast.LENGTH_LONG).show();
+//        try {
+//            if(intent.getAction().equals(UsbManager.ACTION_USB_DEVICE_DETACHED)){
+//                if(mediatorInstance != null){
+//                    mediatorInstance.DebugUnity("Usb detached");
+//                    if(mediatorInstance.isDeviceConnected)
+//                        if(mediatorInstance.unityContext.equals(context)){
+//                            mediatorInstance.DebugUnity("contecsts equals");
+//                            mediatorInstance.CleanupConnection(context);
+//                        }
+//                        else{
+//                            mediatorInstance.DebugUnity("contecsts not equals");
+//                            mediatorInstance.CleanupConnection(mediatorInstance.unityContext);
+//                        }
+//                }
+//
+//            }
+//        } catch (Exception e) {
+//            Toast.makeText(context, e.getMessage(), Toast.LENGTH_LONG).show();
+//            Log.e("[SERIALPORTLIB]", e.getMessage(), e);
+//            //throw new RuntimeException(e);
+//        }
+//    }
+//}
+//
+//
+//    public DetachReceiver receiver = new DetachReceiver(this);
 
 
 /// ====================================== getters & setters ======================================
@@ -541,13 +573,13 @@ public static class DetachReceiver extends BroadcastReceiver{
 ///====================================== for unity ======================================
 
     private static void SendMessageToUnity(String msg){
-        UnityPlayer.UnitySendMessage("Script_UAndReceive", "OnBroadcastReceived", msg);
+        UnityPlayer.UnitySendMessage("Script_UI", "OnBroadcastReceived", msg);
         // Base64.encodeToString(data, Base64.DEFAULT)); // если надо будет отправлять байты
     }
 
     private void DebugUnity(String msg){
         if(isDebug){
-            UnityPlayer.UnitySendMessage("Script_UAndReceive", "OnBroadcastReceived", msg);
+            UnityPlayer.UnitySendMessage("Script_UI", "OnBroadcastReceived", msg);
         }
     }
 
