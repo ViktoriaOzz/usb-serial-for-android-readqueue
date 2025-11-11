@@ -3,8 +3,7 @@ package com.hoho.android.usbserial.unityplugin;
 import android.content.Context;
 
 public interface IUnityController {
-    // из юнити создаем AndroidJavaProxy реализующ этот интерфейс
-    // на Flush делаем вывод в юнитевский контейнер
+    // для настроек usb
 //    byte[] FlushData();
 
 ///====================================== for unity ======================================
@@ -13,7 +12,7 @@ public interface IUnityController {
     void CleanupConnection(Context context);
     void SendBytes(byte[] bytes);
     void InitializeSerial();
-    void ConnectByNumer(int num, IUnityController unity);
+    void ConnectByNumer(int num);
 
 ///====================================== getters & setters ======================================
 
@@ -22,7 +21,8 @@ public interface IUnityController {
     int GetPortsCount();
     boolean GetIsConnected();
     int GetReadBufferDelay();
-    int GetWriteBufferDelay();
+    int GetReadTimeout();
+    int GetWriteTimeout();
     int GetBaudRate();
 
 

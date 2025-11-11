@@ -22,9 +22,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class SerialPortMediator implements IUnityController, com.hoho.android.usbserial.util.SerialInputOutputManager.Listener {
+public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityController, com.hoho.android.usbserial.util.SerialInputOutputManager.Listener {
 
 
 /// ________________________ Entities (from old script) ________________________
@@ -50,7 +51,7 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
 
     private int baudRate = 460800;
     private static String k_usbPermission = "com.example.app.USB_PERMISSION";
-    private boolean isDeviceConnected = false;
+    private volatile boolean isDeviceConnected = false;
     private boolean isDebug = true;
     private int readTimeout = 5; // ms
     private int writeTimeout = 100;
@@ -60,7 +61,7 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
 
     IUnityBufferFetcher unityFetcher;
 
-    private /*volatile*/ final ByteArrayOutputStream baosBuffer = new ByteArrayOutputStream(1024); // default capacity 32 bytes
+    private /*volatile*/ final ByteArrayOutputStream baosBuffer = new ByteArrayOutputStream(2 * 1024); // default capacity 32 bytes
     // private volatile ByteBuffer readBuffer;
 
     private final ReentrantLock reentrantLock = new ReentrantLock();
@@ -107,11 +108,15 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
                     // close
                     usbSerialPort = null;
                 }
+
+                StopFlushLoop();
             }
             catch(Exception e){
                 DebugUnity("Cannot close clearly");
             }
-
+            finally {
+                isDeviceConnected = false;
+            }
             if(permissionReceiver != null){
                 try{
                     context.unregisterReceiver(permissionReceiver);
@@ -144,7 +149,7 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
     }
 
     // async !
-    public void InitializeSerial(){
+    public void InitializeSerial(){ //unityFetcher
 //            Thread initThread = new Thread(() ->{
 //                DebugUnity("Current Thread: " + Thread.currentThread());
 //                InitialThreadFilling();
@@ -154,7 +159,7 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
     }
 
     // put proxy
-    public void ConnectByNumer(int num, IUnityController unity){
+    public void ConnectByNumer(int num){
         this.unity = unity;
         if(this.unity == null){
             DebugUnity("UnityListener is null");
@@ -172,7 +177,7 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
 
             CompletableFuture.runAsync(() ->{
                 DebugUnity("Current Thread: " + Thread.currentThread());
-                ConnectSerial(unity);
+                ConnectSerial();
             });
 
             ConnectToDevice(driver);
@@ -203,7 +208,7 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
         }
     }
 
-    private void ConnectSerial(IUnityController unity){
+    private void ConnectSerial(){
         // ask hasPermission async
         try{
             if(usbManager == null || usbDevice == null){
@@ -248,6 +253,9 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
             InitializeIoManager();
 
             isDeviceConnected = true;
+
+            StartFlushLoop();
+
             DebugUnity("USB connection established");
         }
         catch(Exception e){
@@ -261,9 +269,71 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
     }
 
 
-///====================================== Privates ======================================
+///====================================== Fetcher ======================================
 
+    private Thread loopThread;
 
+    public void StartFlushLoop(){
+        if(loopThread != null && loopThread.isAlive()){
+            DebugUnity("Flushing thread already running");
+            return;
+        }
+        if(isDeviceConnected){
+            loopThread = new Thread(() -> {
+                try{
+                    DebugUnity("Start flushing loop");
+                    FlushLoopa();
+                }
+                catch (InterruptedException e) {
+                    DebugUnity("InterruptedException during flushing data");
+                    onRunError(e);
+                }
+            });
+            loopThread.start();
+        }
+
+        // CompletableFuture.delayedExecutor
+    }
+
+    public void FlushLoopa() throws InterruptedException {
+        while(isDeviceConnected){
+            reentrantLock.lock();
+            try{
+                if(baosBuffer.size() > 0){
+                    byte[] snapshot = baosBuffer.toByteArray();
+                    unityFetcher.FlushData(snapshot);
+                }
+                else{
+                    DebugUnity("Buffer is empty");
+                }
+            } catch (Exception e) {
+                DebugUnity("Error during flushing data on java side");
+            }
+            finally{
+                reentrantLock.unlock();
+            }
+            if(!isDeviceConnected) break;
+            Thread.sleep(readBufferDelay);
+        }
+    }
+
+    private void StopFlushLoop(){
+        if(!isDeviceConnected){
+            try{
+                loopThread.join(readBufferDelay);
+            }
+            catch (InterruptedException e) {
+                DebugUnity("InterruptedException during joining flush loop");
+                onRunError(e);
+            }
+            finally {
+                if(loopThread.isAlive()){
+                    loopThread.interrupt();
+                }
+                loopThread = null; // чтобы переопределить при новом подключении
+            }
+        }
+    }
 
 
 ///====================================== for unity ======================================
@@ -340,6 +410,14 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
      */
     @Override
     public int GetReadBufferDelay() {
+        return readBufferDelay;
+    }
+
+    /**
+     * @return
+     */
+    @Override
+    public int GetReadTimeout() {
         return readTimeout;
     }
 
@@ -347,8 +425,8 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
      * @return
      */
     @Override
-    public int GetWriteBufferDelay() {
-        return 0;
+    public int GetWriteTimeout() {
+        return writeTimeout;
     }
 
     /**
@@ -356,7 +434,7 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
      */
     @Override
     public int GetBaudRate() {
-        return 0;
+        return baudRate;
     }
 
     /**
@@ -368,7 +446,7 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
             readBufferDelay = delay;
         }
         else{
-            DebugUnity("Attempt to set unallowed readBufferDelay: " + delay);
+            DebugUnity("Attempt to set unallowed readBufferDelay. Current is: " + readBufferDelay);
         }
     }
 
@@ -377,7 +455,12 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
      */
     @Override
     public void SetReadTimeout(int timeout) {
-
+        if(timeout > 0){
+            readTimeout = timeout;
+        }
+        else{
+            DebugUnity("Unallowed read timeout, current " + readTimeout);
+        }
     }
 
     /**
@@ -385,7 +468,12 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
      */
     @Override
     public void SetWriteTimeout(int timeout) {
-
+        if(timeout > 0){
+            writeTimeout = timeout;
+        }
+        else{
+            DebugUnity("Unallowed write timeout, current " + writeTimeout);
+        }
     }
 
     /**
@@ -394,7 +482,7 @@ public class SerialPortMediator implements IUnityController, com.hoho.android.us
     public void SetBaudRate(int newBR){
         if (newBR <= 0)
         {
-            DebugUnity("Entered invalid baud rate. Default is 460800");
+            DebugUnity("Entered invalid baud rate. Current is " + baudRate);
         }
         else
         {
