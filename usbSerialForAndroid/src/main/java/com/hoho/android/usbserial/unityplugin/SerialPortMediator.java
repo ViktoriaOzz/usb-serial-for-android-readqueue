@@ -4,11 +4,12 @@ import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.util.Base64;
+import android.util.Log;
+import android.widget.Toast;
 
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
@@ -17,12 +18,9 @@ import com.hoho.android.usbserial.util.SerialInputOutputManager;
 import com.unity3d.player.UnityPlayer;
 
 import java.io.ByteArrayOutputStream;
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityController, com.hoho.android.usbserial.util.SerialInputOutputManager.Listener {
@@ -44,7 +42,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 
     /// ________________________ Entities from Unity ________________________
 
-    private Context context;
+    private Context unityContext;
     private IUnityController unity;
 
 /// ________________________ parameters ________________________
@@ -69,7 +67,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 ///====================================== Constructor ======================================
 
     public SerialPortMediator(Context unityActivity){
-        this.context = unityActivity;
+        this.unityContext = unityActivity;
         DebugUnity("Constructed");
     }
 
@@ -192,7 +190,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
     private void InitialThreadFilling(){
         try{
             // usbManager, prober, drivers. count, names
-            usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+            usbManager = (UsbManager) unityContext.getSystemService(Context.USB_SERVICE);
             UsbSerialProber prober = UsbSerialProber.getDefaultProber();
             availableDrivers = prober.findAllDrivers(usbManager);
             availablePortCount = availableDrivers.size();
@@ -229,7 +227,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
         try{
             Intent intent = new Intent(k_usbPermission);
             PendingIntent pendingIntent = PendingIntent.getBroadcast(
-                    context, 0, intent, PendingIntent.FLAG_IMMUTABLE);
+                    unityContext, 0, intent, PendingIntent.FLAG_IMMUTABLE);
             usbManager.requestPermission(usbDevice, pendingIntent);
         }
         catch(Exception e){
@@ -336,38 +334,45 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
     }
 
 
-///====================================== for unity ======================================
+///====================================== Detach Receiver ======================================
+
+public static class DetachReceiver extends BroadcastReceiver{
+
+    SerialPortMediator mediatorInstance;
+
+    public DetachReceiver(SerialPortMediator a){
+        mediatorInstance = a;
+    }
+
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        Toast.makeText(context, "received detach", Toast.LENGTH_LONG).show();
+        try {
+            if(intent.getAction().equals(UsbManager.ACTION_USB_DEVICE_DETACHED)){
+                if(mediatorInstance != null){
+                    mediatorInstance.DebugUnity("Usb detached");
+                    if(mediatorInstance.isDeviceConnected)
+                        if(mediatorInstance.unityContext.equals(context)){
+                            mediatorInstance.DebugUnity("contecsts equals");
+                            mediatorInstance.CleanupConnection(context);
+                        }
+                        else{
+                            mediatorInstance.DebugUnity("contecsts not equals");
+                            mediatorInstance.CleanupConnection(mediatorInstance.unityContext);
+                        }
+                }
+
+            }
+        } catch (Exception e) {
+            Toast.makeText(context, e.getMessage(), Toast.LENGTH_LONG).show();
+            Log.e("[SERIALPORTLIB]", e.getMessage(), e);
+            //throw new RuntimeException(e);
+        }
+    }
+}
 
 
-//    /**
-//     *
-//     */
-//    @Override
-//    public void FlushData(){
-//
-//        // currentActivity.runOnUiThread(new Runnable () {..});
-//
-//        reentrantLock.lock();
-//        try{
-//            byte[] result = new byte[baosBuffer.size()];
-//            result = baosBuffer.toByteArray();
-//            baosBuffer.reset();
-//
-//            if(isDebug){
-//                DebugUnity("Pack len: " + result.length);
-//                debugBitOfData(result);
-//            }
-//
-//            return result;
-//        }
-//        catch (Exception e) {
-//            onRunError(e);
-//            return null;
-//        }
-//        finally {
-//            reentrantLock.unlock();
-//        }
-//    }
+    public DetachReceiver receiver = new DetachReceiver(this);
 
 
 /// ====================================== getters & setters ======================================
