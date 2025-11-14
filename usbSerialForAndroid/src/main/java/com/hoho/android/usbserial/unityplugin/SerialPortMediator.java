@@ -8,25 +8,25 @@ import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.os.Handler;
+import android.os.Looper;
 import android.util.Base64;
 import android.util.Log;
-import android.widget.Toast;
 
-import com.hoho.android.usbserial.driver.UsbSerialDriver;
-import com.hoho.android.usbserial.driver.UsbSerialPort;
-import com.hoho.android.usbserial.driver.UsbSerialProber;
+import com.hoho.android.usbserial.driver.*;
 import com.hoho.android.usbserial.util.SerialInputOutputManager;
 import com.unity3d.player.UnityPlayer;
 
 import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityController, com.hoho.android.usbserial.util.SerialInputOutputManager.Listener {
+
+public class SerialPortMediator implements IUnityController, com.hoho.android.usbserial.util.SerialInputOutputManager.Listener {
 
 
 /// ________________________ Entities (from old script) ________________________
@@ -57,6 +57,8 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 
     private Context unityContext;
     IUnityBufferFetcher unityFetcher;
+    private FlushThread flushThread;
+    // private Handler unityLooper;
 
 /// ________________________ Bytes buffer ________________________
 
@@ -77,7 +79,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 ///====================================== for unity ======================================
 // pure copies of old unity's script
 
-    public boolean TryConnect(){
+    public boolean TryConnect(Context context){
 //        Thread initThread = new Thread(() -> {
 //            InitializeSerial();
 //            DebugUnity("Current Thread: " + Thread.currentThread());
@@ -86,7 +88,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 
         try{
             CompletableFuture.runAsync(() -> {
-                InitializeSerial();
+                InitializeSerial(context);
                 DebugUnity("[TryConnect.CompletableFuture]Current Thread: " + Thread.currentThread());
             });
 
@@ -94,6 +96,15 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
                 DebugUnity("usbManager == null");
                 return false;
             }
+
+            ///  thread debugs
+            var threads = Thread.getAllStackTraces().keySet();
+
+            for(var thread : threads){
+                DebugUnity(thread.getName());
+            }
+
+
 
             return true;
         }
@@ -107,16 +118,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 
     public void CleanupConnection(Context context){
         //
-        if(isDeviceConnected){
-            if(serialIoManager != null){
-                // stop
-                serialIoManager = null;
-            }
-            if(usbSerialPort != null){
-                // close
-                usbSerialPort = null;
-            }
-
+//        if(isDeviceConnected){
             try{
                 StopFlushLoop();
             }
@@ -127,11 +129,36 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
                 isDeviceConnected = false;
                 DebugUnity("SUCCESSFULLY DISCONNECTED");
             }
+
+
+            if(serialIoManager != null){
+                // stop
+                serialIoManager = null;
+            }
+            if(usbSerialPort != null){
+                // close
+                usbSerialPort = null;
+            }
+
+            if(usbManager != null){
+                usbManager = null;
+            }
+            if(usbDevice != null){
+                usbDevice = null;
+            }
+            if(driver != null){
+                driver = null;
+            }
+
+            // try to correct delete all
+
+
+
             if(permissionReceiver != null){
                 DebugUnity("Somehow permission receiver not null");
                 try{
-                    // context.unregisterReceiver(permissionReceiver);
-                    unityContext.unregisterReceiver(permissionReceiver);
+                    context.unregisterReceiver(permissionReceiver);
+                    // unityContext.unregisterReceiver(permissionReceiver);
                 }
                 catch(Exception e){
                     DebugUnity("Cannot unregister permissionReceiver clearly");
@@ -140,10 +167,16 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
             else{
                 DebugUnity("Permission receiver was null");
             }
-        }
-        else {
-            DebugUnity("Not connected");
-        }
+            if(unityContext != null){
+                unityContext = null;
+            }
+            if(unityFetcher != null){
+                unityFetcher = null;
+            }
+//        }
+//        else {
+//            DebugUnity("Not connected");
+//        }
     }
 
     public void SendBytes(byte[] bytes){
@@ -167,7 +200,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
     }
 
     // async !
-    public void InitializeSerial(){
+    public void InitializeSerial(Context context){
 //            Thread initThread = new Thread(() ->{
 //                DebugUnity("Current Thread: " + Thread.currentThread());
 //                InitialThreadFilling();
@@ -175,9 +208,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 //            initThread.start();
         try{
             DebugUnity("[InitializeSerial] Current Thread: " + Thread.currentThread());
-            DebugUnity("[InitializeSerial] Current ThreadGroup: " + Objects.requireNonNull(Thread.currentThread().getThreadGroup()).getName());
-            DebugUnity("[InitializeSerial] Current ThreadGroup: " + Thread.currentThread().getState().name());
-            InitialThreadFilling();
+            InitialThreadFilling(context);
         }
         catch (Exception e) {
             DebugUnity("[InitializeSerial] " + e.getMessage());
@@ -187,6 +218,9 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 
     public void ConnectByNumer(int num){
         try{
+            // stuff
+            // unityLooper = new Handler(Looper.getMainLooper()); // чтобы звать сгруз и не захламлять главный поток плагином
+
             if(availableDrivers != null){
                 driver = availableDrivers.get(num);
                 usbDevice = driver.getDevice();
@@ -202,6 +236,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
                     ConnectSerial();
                 });
 
+                // здесь изменяем размер читательного буффера!!
                 ConnectToDevice(driver);
             }
             else{
@@ -257,10 +292,11 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 
     // CompletableFuture.isDone() // - проверка работает ли метод
 
-    private void InitialThreadFilling(){
+    private void InitialThreadFilling(Context context){
         try{
             // usbManager, prober, drivers. count, names
-            usbManager = (UsbManager) unityContext.getSystemService(Context.USB_SERVICE);
+            // usbManager = (UsbManager) unityContext.getSystemService(Context.USB_SERVICE);
+            usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
             UsbSerialProber prober = UsbSerialProber.getDefaultProber();
             availableDrivers = prober.findAllDrivers(usbManager);
             availablePortCount = availableDrivers.size();
@@ -293,7 +329,7 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
         }
         catch (Exception e) {
             Log.e("SERIAL PORT ERROR", "[ConnectSerial]" + e.getMessage());
-            DebugUnity("[ConnectSerial] " + e.getMessage());
+            DebugUnity("[ConnectSerial] [SERIAL PORT ERROR] " + e.getMessage());
             onRunError(e);
         }
     }
@@ -313,6 +349,10 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
     private void ConnectToDevice(UsbSerialDriver driver){
         try{
             UsbDeviceConnection connection = usbManager.openDevice(usbDevice);
+
+            // default buffer size is  , try to increase
+            DebugUnity("Device name: " + driver.getClass().getName() + "|" + driver.getClass().getSimpleName());
+
             if(usbManager == null){
                 DebugUnity("usbManager is null");
                 return;
@@ -326,7 +366,18 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
                 return;
             }
             List<UsbSerialPort> ports = driver.getPorts();
-            usbSerialPort = ports.get(0);
+
+            usbSerialPort = ports.get(0); // extends CommonSerialPort
+
+            // TODO private static final int MAX_READ_SIZE = /*16*/64 * 1024;
+//            try{
+//                DebugUnity("Port name: " + usbSerialPort.getClass().getName() + " | " + usbSerialPort.getClass().getSimpleName());
+//                Field portBuff = usbSerialPort.getClass().getDeclaredField("");
+//            }
+//            catch(Exception e){
+//                onRunError(e);
+//            }
+
 
             usbSerialPort.open(connection);
             usbSerialPort.setParameters(baudRate, 8,1, UsbSerialPort.PARITY_NONE);
@@ -373,22 +424,23 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 //                }
 //            });
 //            loopThread.start();
-
-
             DebugUnity("[StartFlushLoop] Current Thread: " + Thread.currentThread());
-            //not another thread but async
-            CompletableFuture.runAsync(() ->{
-                try{
-                    DebugUnity("Start flushing loop");
-                    DebugUnity("[StartFlushLoop.CompletableFuture] Current Thread: " + Thread.currentThread());
-                    FlushLoopa();
-                }
-                catch (InterruptedException e) {
-                    DebugUnity("InterruptedException during flushing data");
-                    onRunError(e);
-                }
-            });
 
+            flushThread = new FlushThread();
+            flushThread.start();
+
+            //not another thread but async
+//            CompletableFuture.runAsync(() ->{
+//                try{
+//                    DebugUnity("Start flushing loop");
+//                    DebugUnity("[StartFlushLoop.CompletableFuture] Current Thread: " + Thread.currentThread());
+//                    FlushLoopa();
+//                }
+//                catch (InterruptedException e) {
+//                    DebugUnity("InterruptedException during flushing data");
+//                    onRunError(e);
+//                }
+//            });
 
         }
 
@@ -401,41 +453,51 @@ public class SerialPortMediator implements /*IUnityBufferFetcher, */IUnityContro
 
         return null;
     }
-private boolean checkBufferDelay = true;
+//    private boolean checkBufferDelay = true;
     public void FlushLoopa() throws InterruptedException {
-        while(isDeviceConnected){
+        while(/*isDeviceConnected*/ true){
+
+            if(!isDeviceConnected){
+                DebugUnity("Disconnect, so flush loop closed");
+                break;
+            }
             reentrantLock.lock();
             try{
+                Thread.sleep(readBufferDelay);
+
                 if(baosBuffer.size() > 0){
-                    if(baosBuffer.size() >= (64000)){
+                    if(baosBuffer.size() >= (60_000)){
                         DebugUnity("Buffer is almost 64 KB !!! stop!");
                         //baosBuffer.reset();
                     }
-//                    byte[] snapshot = ;
-                    unityFetcher.FlushData(/*snapshot*/ baosBuffer.toByteArray());
+                    byte[] snapshot = baosBuffer.toByteArray();
+                    unityFetcher.FlushData(snapshot);
+                    DebugUnity("[FLUSHEDBUFFER] " + String.format("%02X", snapshot) );
                     baosBuffer.reset();
                 }
 //                else{
                     // DebugUnity("Buffer is empty");
 //                }
             }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw e;
+            }
             catch (Exception e) {
-                DebugUnity("Error during flushing data on java side");
+                DebugUnity("Error during flushing data on java side: " + e.getMessage());
             }
             finally{
                 reentrantLock.unlock();
             }
-            if(!isDeviceConnected){
-                DebugUnity("Disconnect, so flush loop closed");
-                break;
-            }
-            if(checkBufferDelay){
-                checkBufferDelay = false;
-                DebugUnity("now readBufferDelay is: " + readBufferDelay);
-            }
-            Thread.sleep(readBufferDelay);
+//            if(checkBufferDelay){
+//                checkBufferDelay = false;
+//                DebugUnity("now readBufferDelay is: " + readBufferDelay);
+//            }
         }
     }
+
+
+
 
     //
 //    Handler mHandler = new Handler();
@@ -461,6 +523,25 @@ private boolean checkBufferDelay = true;
     private void StopFlushLoop(){
         if(!isDeviceConnected){
 
+            if(flushThread != null){
+                flushThread.interrupt();
+                try{
+                    flushThread.join(500);
+                }
+                catch (InterruptedException e) {
+                    if(flushThread.isRunning){
+
+                    }
+                    // Thread.currentThread().interrupt();
+                }
+                finally {
+                    // TODO
+                    flushThread = null;
+                }
+            }
+
+
+
             // CompletableFuture.isDone() // - проверка работает ли метод
 
 //            try{
@@ -484,6 +565,89 @@ private boolean checkBufferDelay = true;
 
     }
 
+///====================================== Flush Thread ======================================
+
+    private class FlushThread extends Thread{
+        // defaults
+        private boolean isRunning = true;
+        private int flushDelay = 40;
+        private final List<Byte> buffer = Collections.synchronizedList(new ArrayList<>()); // plagiat from old dst lib
+        private final ReentrantLock reentrantLock = new ReentrantLock();
+
+        public synchronized void setTimer(int timer)
+        {
+            flushDelay = timer;
+        }
+        public synchronized void addPack(byte[] data) { // sync on this
+            synchronized(buffer)
+            {
+                for (byte b : data)
+                {
+                    buffer.add(b);
+                }
+            }
+        }
+        public void stopFlush() {
+            isRunning = false;
+            this.interrupt(); // Прерываем sleep если нужно
+        }
+
+        @Override
+        public void run()
+        {
+            while(isRunning && !this.isInterrupted() /*не снимает флаг прерывания*/ && isDeviceConnected){
+
+                try{
+//                    if(isDeviceConnected){
+                        // this.interrupt();
+
+//                    }
+
+                    Thread.sleep(flushDelay);
+
+                    synchronized (buffer){
+                        if(buffer.size() > 60_000){
+                            DebugUnity("Buffer is almost 64 KB !!! stop!");
+                        }
+
+                        byte[] snapshot = new byte[buffer.size()];
+                        for(int i = 0; i< buffer.size(); i++){
+                            snapshot[i] = buffer.get(i);
+                        }
+                        //snapshot = buffer.toArray();
+                        unityFetcher.FlushData(snapshot);
+
+//                        if(isDebug){
+//                            StringBuilder hexString = new StringBuilder();
+//                            for (byte b : snapshot) {
+//                                hexString.append(snapshot[(b >>> 4) & 0x0F]);
+//                                hexString.append(snapshot[b & 0x0F]);
+//                                // hexString.append(String.format("%02X", b & 0xFF));
+//                            }
+//                            DebugUnity("[FLUSHEDBUFFER] " + hexString );
+//                        }
+
+                        buffer.clear();;
+
+                    }
+
+                }
+                catch(InterruptedException e){
+                    DebugUnity("Flushing .run ended interrupted");
+                    break; //!!
+                }
+                catch(Exception e){
+                    DebugUnity("[Flushing .run error] " + e.getMessage());
+                    onRunError(e);
+                    if(!(e instanceof RuntimeException)){
+                        break;
+                    }
+                }
+            }
+            DebugUnity("Finish flushing loop, connection alive?: " + isDeviceConnected);
+        }
+
+    }
 
 ///====================================== Detach Receiver ======================================
 
@@ -599,7 +763,7 @@ private boolean checkBufferDelay = true;
     @Override
     public void SetReadBufferDelay(int delay) {
         if(delay > 0){
-            checkBufferDelay = true;
+            // checkBufferDelay = true;
             readBufferDelay = delay;
         }
         else{
@@ -666,8 +830,13 @@ private boolean checkBufferDelay = true;
     public void onNewData(byte[] data) {
         reentrantLock.lock();
         try{
-            baosBuffer.write(data, 0, data.length);
+            // TODO try to switch baos to ByteBuffer
 
+            if(flushThread != null){
+                flushThread.addPack(data);
+            }
+//            baosBuffer.write(data, 0, data.length);
+//            Log.v("[SERIALPORTLIB]", "[onNewData] len " + data.length);
         }
         catch(Exception e){
             DebugUnity("[onNewData] " + e.getMessage());
@@ -677,6 +846,10 @@ private boolean checkBufferDelay = true;
             reentrantLock.unlock();
         }
     }
+
+    /// what is serial timer --
+
+
 
     /**
      * Called when  SerialInputOutputManager.runRead() or SerialInputOutputManager.runWrite() aborts due to an error.
