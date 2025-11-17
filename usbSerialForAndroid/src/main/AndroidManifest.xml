@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.USB_PERMISSION" />
+    <uses-feature android:name="android.hardware.usb.host" />
+<!--    <activity android:exported="true">-->
+<!--        <intent-filter>-->
+<!--            <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />-->
+<!--        </intent-filter>-->
+<!--        <meta-data-->
+<!--            android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"-->
+<!--            android:resource="@xml/device_filter" />-->
+<!--    </activity>-->
 <!--    <receiver android:name=".unityplugin.SerialPortMediator$DetachReceiver">-->
 <!--        <intent-filter>-->
 <!--            <action android:name="android.intent.action.ACTION_POWER_CONNECTED"/>-->

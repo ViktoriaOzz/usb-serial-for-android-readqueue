@@ -9,7 +9,7 @@ public interface IUnityController {
 ///====================================== for unity ======================================
 
     boolean TryConnect(Context context);
-    void CleanupConnection(Context context);
+    void CleanupConnection(/*Context context*/);
     void SendBytes(byte[] bytes);
     void InitializeSerial(Context context);
     void ConnectByNumer(int num);
