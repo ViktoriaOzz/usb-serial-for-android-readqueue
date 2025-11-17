@@ -12,12 +12,14 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.util.Base64;
 import android.util.Log;
+import android.widget.Toast;
 
 import com.hoho.android.usbserial.driver.*;
 import com.hoho.android.usbserial.util.SerialInputOutputManager;
 import com.unity3d.player.UnityPlayer;
 
 import java.io.ByteArrayOutputStream;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -36,7 +38,7 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
     private UsbDevice usbDevice;
     private UsbSerialPort usbSerialPort;
     private SerialInputOutputManager serialIoManager;
-    private BroadcastReceiver permissionReceiver;
+    private BroadcastReceiver permissionReceiver; // dummy
     private UsbSerialDriver driver;
 
     private List<UsbSerialDriver> availableDrivers;
@@ -75,6 +77,9 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
         this.unityContext = unityActivity;
         this.unityFetcher = fetcher;
         DebugUnity("Constructed, is unityFetcher available: " + (unityFetcher!=null));
+
+        // костыль для детач ресивера
+        instance = this;
     }
 
 ///====================================== for unity ======================================
@@ -468,12 +473,8 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
     }
 
 
-    // @Asynchronous // cannot resolve
-    public Future<Void> FlushLoop(){
-
-        return null;
-    }
 //    private boolean checkBufferDelay = true;
+
     public void FlushLoopa() throws InterruptedException {
         while(/*isDeviceConnected*/ true){
 
@@ -591,21 +592,41 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
         // defaults
         private boolean isRunning = true;
         private int flushDelay = 40;
-        private final List<Byte> buffer = Collections.synchronizedList(new ArrayList<>()); // plagiat from old dst lib
         private final ReentrantLock reentrantLock = new ReentrantLock();
+
+        // private final List<Byte> buffer = Collections.synchronizedList(new ArrayList<>()); // plagiat from old dst lib
+         private final ByteArrayOutputStream buffer = new ByteArrayOutputStream (8192);
+//        private final byte[] buffer = new byte[65536]; //
+//        private int writePos = 0;
 
         public synchronized void setTimer(int timer)
         {
             flushDelay = timer;
-            DebugUnity("Set flushing delay: " + flushDelay);
+            DebugUnity("[FlushThread] Set flushing delay: " + flushDelay);
         }
-        public synchronized void addPack(byte[] data) { // sync on this
+        public /*synchronized*/ void addPack(byte[] data) { // sync on this
             synchronized(buffer)
             {
-                for (byte b : data)
-                {
-                    buffer.add(b);
-                }
+//                int len = data.length;
+//                int end = writePos + len;
+//
+//                if(end < buffer.length){
+//                    System.arraycopy(data, 0, buffer, writePos, len);
+//                }
+//                else{
+//                    int first = buffer.length - writePos;
+//                    System.arraycopy(data, 0, buffer, writePos, first);
+//                    System.arraycopy(data, first, buffer, 0, len - first);
+//                }
+//                writePos = (writePos + len) % buffer.length;
+
+
+                buffer.write(data, 0, data.length);  // for BAOS
+
+//                for (byte b : data) // for List<Byte>
+//                {
+//                    buffer.add(b);
+//                }
             }
         }
         public void stopFlush() {
@@ -631,31 +652,46 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
                 try{
 
                     long start = System.nanoTime();
+
                     synchronized (buffer){
-                        if(buffer.size() > 32_000){
-                            DebugUnity("Buffer is more than 32 KB !!!");
-                        }
+//                        if(buffer.size() > 32_000){
+//                            DebugUnity("Buffer is more than 32 KB !!!"); // never reached
+//                        }
 
                         byte[] snapshot = new byte[buffer.size()];
-                        for(int i = 0; i< buffer.size(); i++){
-                            snapshot[i] = buffer.get(i);
-                        }
+                        Field f = ByteArrayOutputStream.class.getDeclaredField("buf"); // напрямую копия из протектед класса
+                        f.setAccessible(true);
+                        snapshot = (byte[]) f.get(buffer);
+
                         unityFetcher.FlushData(snapshot);
 
-                        buffer.clear();;
+                        buffer.reset();
+                        if(isDebug && snapshot != null){
+
+                            debugBitOfData(snapshot);
+                        }
+
+                        //  List<Byte>
+//                        byte[] snapshot = new byte[buffer.size()];
+//                        for(int i = 0; i< buffer.size(); i++){
+//                            snapshot[i] = buffer.get(i);
+//                        }
+//                        unityFetcher.FlushData(snapshot);
+//
+//                        buffer.clear();
 
                     }
 
-                    long flushDuration = System.nanoTime() - start;
-                    int mills = (int)((flushDuration + 1000_000 - 1) / 1000_000);
+//                    long flushDuration = System.nanoTime() - start;
+//                    int mills = (int)((flushDuration + 1000_000 - 1) / 1000_000);
 
-                    if(mills < flushDelay){
-                        Thread.sleep(flushDelay - mills);
-                    }
-                    else{//
-                        Thread.sleep(1);
-                    }
-
+//                    if(mills < flushDelay){
+//                        Thread.sleep(flushDelay - mills + 1);
+//                    }
+//                    else{//
+//                        Thread.sleep(1);
+//                    }
+                    Thread.sleep(flushDelay);
                 }
                 catch(InterruptedException e){
                     DebugUnity("Flushing .run ended interrupted");
@@ -675,44 +711,54 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
     }
 
 ///====================================== Detach Receiver ======================================
+    // singleton пока только для ресивера и ни для чего больше
+private static SerialPortMediator instance;
 
-//public static class DetachReceiver extends BroadcastReceiver{
-//
-//    SerialPortMediator mediatorInstance;
-//
+public static class DetachReceiver extends BroadcastReceiver{
+
+    SerialPortMediator mediatorInstance;
+
 //    public DetachReceiver(SerialPortMediator a){
 //        mediatorInstance = a;
 //    }
-//
-//    @Override
-//    public void onReceive(Context context, Intent intent) {
-//        Toast.makeText(context, "received detach", Toast.LENGTH_LONG).show();
-//        try {
-//            if(intent.getAction().equals(UsbManager.ACTION_USB_DEVICE_DETACHED)){
-//                if(mediatorInstance != null){
-//                    mediatorInstance.DebugUnity("Usb detached");
-//                    if(mediatorInstance.isDeviceConnected)
+
+    public DetachReceiver() {
+        mediatorInstance = SerialPortMediator.instance;
+    }
+
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        Toast.makeText(context, "received detach", Toast.LENGTH_LONG).show();
+        try {
+            if(intent.getAction().equals(UsbManager.ACTION_USB_DEVICE_DETACHED)){
+                if(mediatorInstance != null){
+                    mediatorInstance.DebugUnity("Usb detached");
+                    if(mediatorInstance.isDeviceConnected){
+
+                        mediatorInstance.CleanupConnection();
+
 //                        if(mediatorInstance.unityContext.equals(context)){
-//                            mediatorInstance.DebugUnity("contecsts equals");
-//                            mediatorInstance.CleanupConnection(context);
+//                            mediatorInstance.DebugUnity("contecsts was equals");
+//                            mediatorInstance.CleanupConnection();
 //                        }
 //                        else{
-//                            mediatorInstance.DebugUnity("contecsts not equals");
-//                            mediatorInstance.CleanupConnection(mediatorInstance.unityContext);
+//                            mediatorInstance.DebugUnity("contecsts was not equals");
+//                            mediatorInstance.CleanupConnection();
 //                        }
-//                }
-//
-//            }
-//        } catch (Exception e) {
-//            Toast.makeText(context, e.getMessage(), Toast.LENGTH_LONG).show();
-//            Log.e("[SERIALPORTLIB]", e.getMessage(), e);
-//            //throw new RuntimeException(e);
-//        }
-//    }
-//}
-//
-//
-//    public DetachReceiver receiver = new DetachReceiver(this);
+                    }
+                }
+
+            }
+        } catch (Exception e) {
+            Toast.makeText(context, e.getMessage(), Toast.LENGTH_LONG).show();
+            Log.e("[SERIALPORTLIB]", e.getMessage(), e);
+            //throw new RuntimeException(e);
+        }
+    }
+}
+
+
+    public DetachReceiver receiver = new DetachReceiver();
 
 
 /// ====================================== getters & setters ======================================
@@ -903,8 +949,8 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
 ///====================================== Debug bytes ======================================
 
     private void debugBitOfData(byte[] data){
-        int debugLen  = 15;
-        if(15 > data.length) debugLen = data.length;
+        int debugLen  = 128;
+        if(debugLen > data.length) debugLen = data.length;
 
         DebugUnity("DebugLen:"  + debugLen);
         if(debugLen > 0){

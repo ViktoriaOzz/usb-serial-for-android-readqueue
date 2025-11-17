@@ -2,6 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.USB_PERMISSION" />
     <uses-feature android:name="android.hardware.usb.host" />
+    <application>
+        <receiver
+            android:name="com.hoho.android.usbserial.unityplugin.SerialPortMediator$DetachReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_DETACHED"/>
+            </intent-filter>
+        </receiver>
+    </application>>
 <!--    <activity android:exported="true">-->
 <!--        <intent-filter>-->
 <!--            <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />-->
