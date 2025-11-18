@@ -32,7 +32,7 @@ public abstract class CommonUsbSerialPort implements UsbSerialPort {
     public static boolean DEBUG = false;
 
     private static final String TAG = CommonUsbSerialPort.class.getSimpleName();
-    private static final int MAX_READ_SIZE = /*16*/32 * 1024; // = old bulkTransfer limit prior to Android 9
+    private static final int MAX_READ_SIZE = 16 * 1024; // = old bulkTransfer limit prior to Android 9
 
     protected final UsbDevice mDevice;
     protected final int mPortNumber;

@@ -48,5 +48,5 @@ dependencies {
     // later versions fail on old Android devices with missing java.time.Duration class
     androidTestImplementation 'org.apache.commons:commons-lang3:3.19.0'
 
-    compileOnly(files("libs/classes.jar"))
+    compileOnly(files("libs/classes.jar")) // неймспейсы из юнити !!
 }
