@@ -326,7 +326,7 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
             while(!usbManager.hasPermission(usbDevice)){
                 RequestUsbPermission();
                 DebugUnity("There is no permission yet");
-                Thread.sleep(1000);
+                Thread.sleep(500);
                 // yield return new WaitForSeconds(1);
             }
             if(usbManager.hasPermission(usbDevice)){
@@ -364,7 +364,7 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
 
                 }
             } catch (Exception e) {
-                DebugUnity("hasPermissionn -> openDevice");
+                DebugUnity("[ConnectToDevice ERROR] hasPermissionn -> openDevice");
             }
 
             // ParcelFileDescriptor pfd = usbManager.openDevice(usbDevice.getDeviceName(), unityContext.getPackageName());
@@ -375,15 +375,15 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
 //            DebugUnity("Trying to connect from: " + Thread.currentThread());
 
             if(usbManager == null){
-                DebugUnity("usbManager is null");
+                DebugUnity("[ConnectToDevice ERROR] usbManager is null");
                 return;
             }
             if(usbDevice == null){
-                DebugUnity("usbDevice is null");
+                DebugUnity("[ConnectToDevice ERROR] usbDevice is null");
                 return;
             }
             if(connection == null){
-                DebugUnity("USB connection is null");
+                DebugUnity("[ConnectToDevice ERROR] USB connection is null");
                 return;
             }
 
@@ -391,28 +391,32 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
             try{
                 usbSerialPort = ports.get(0);
             } catch (Exception e) {
-                DebugUnity("Get port");
+                DebugUnity("[ConnectToDevice ERROR] Get port");
+                return;
             }
 
             try{
                 usbSerialPort.open(connection);
 
             } catch (Exception e) {
-                DebugUnity("port.Open connection");
+                DebugUnity("[ConnectToDevice ERROR] port.Open connection");
+                return;
             }
             try{
                 usbSerialPort.setParameters(baudRate, 8,1, UsbSerialPort.PARITY_NONE);
 
             } catch (Exception e) {
 
-                DebugUnity("set port parameters");
+                DebugUnity("[ConnectToDevice ERROR] set port parameters");
+                return;
             }
             try{
 
                 InitializeIoManager();
 
             } catch (Exception e) {
-                DebugUnity("during InitializeIoManager");
+                DebugUnity("[ConnectToDevice ERROR] during InitializeIoManager");
+                return;
             }
 
 
@@ -423,7 +427,8 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
                 StartFlushLoop();
 
             } catch (Exception e) {
-                DebugUnity("during StartFlushLoop");
+                DebugUnity("[ConnectToDevice ERROR] during StartFlushLoop");
+                return;
             }
 
 
@@ -461,6 +466,7 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
             @Override
             public void onRunError(Exception e) {
                 SendMessageToUnity("[runRead/runWrite ERROR] " + e.getMessage());
+                // TODO stop comport
             }
         });
         serialIoManager.start();
@@ -524,9 +530,6 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
 //            }
         }
     }
-
-
-
 
     //
 //    Handler mHandler = new Handler();
@@ -630,7 +633,7 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
         private final ReentrantLock reentrantLock = new ReentrantLock();
 
         // этот вариант самый медленный, но самый надежный (?)
-         private List<Byte> buffer = Collections.synchronizedList(new ArrayList<>());
+         private final List<Byte> buffer = Collections.synchronizedList(new ArrayList<>());
 
 //         private final ByteArrayOutputStream buffer = new ByteArrayOutputStream (8192);
 //        private final byte[] buffer = new byte[65536]; //
@@ -694,8 +697,8 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
                         }
 
 
+                        long start = System.nanoTime();
                         synchronized (buffer){
-                            long start = System.nanoTime();
 
 
 //                        if(buffer.size() > 32_000){
@@ -724,11 +727,11 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
 
                                 buffer.clear();
                             }
-                            long nanos = System.nanoTime() - start;
-                            flushDuration = (int)((nanos + 1000_000 - 1) / 1000_000);
 
                         }
 
+                        long nanos = System.nanoTime() - start;
+                        flushDuration = (int)((nanos + 1000_000 - 1) / 1000_000);
 
 //                    if(mills < flushDelay){
 //                        Thread.sleep(flushDelay - mills + 1);
@@ -751,7 +754,7 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
                     }
                 }
                 DebugUnity("Finish flushing loop");
-                DebugUnity("isRunning" + isRunning + ", this.isInterrupted() " + this.isInterrupted() + ", isDeviceConnected: " + isDeviceConnected);
+                DebugUnity("isRunning " + isRunning + ", this.isInterrupted() " + this.isInterrupted() + ", isDeviceConnected " + isDeviceConnected);
             }
 
         }
