@@ -678,18 +678,26 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
                 DebugUnity("FlushThread.run current thread: " + Thread.currentThread() + " " + Thread.currentThread().getId());
             }
 
-
             if(unityFetcher == null){
                 DebugUnity("unityFetcher is null!");
             }
-            else
-            while(isRunning && !this.isInterrupted() /*не снимает флаг прерывания*/ && isDeviceConnected){
+            else{
+                int flushDuration = 0;
+                while(isRunning && !this.isInterrupted() /*не снимает флаг прерывания*/ && isDeviceConnected){
 
-                try{
+                    try{
+                        if(flushDuration < flushDelay){
+                            Thread.sleep(flushDelay - flushDuration);
+                        }
+                        else{
+                            Thread.sleep(1);
+                        }
 
-                    // long start = System.nanoTime();
 
-                    synchronized (buffer){
+                        synchronized (buffer){
+                            long start = System.nanoTime();
+
+
 //                        if(buffer.size() > 32_000){
 //                            DebugUnity("Buffer is more than 32 KB !!!"); // never reached
 //                        }
@@ -706,21 +714,21 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
 //                            debugBitOfData(snapshot);
 //                        }
 
-                        //  List<Byte>
-                        if(buffer.size() > 1){
-                            byte[] snapshot = new byte[buffer.size()];
-                            for(int i = 0; i< buffer.size(); i++){
-                                snapshot[i] = buffer.get(i);
-                            }
-                            unityFetcher.FlushData(snapshot);
+                            //  List<Byte>
+                            if(buffer.size() > 1){
+                                byte[] snapshot = new byte[buffer.size()];
+                                for(int i = 0; i< buffer.size(); i++){
+                                    snapshot[i] = buffer.get(i);
+                                }
+                                unityFetcher.FlushData(snapshot);
 
-                            buffer.clear();
+                                buffer.clear();
+                            }
+                            long nanos = System.nanoTime() - start;
+                            flushDuration = (int)((nanos + 1000_000 - 1) / 1000_000);
+
                         }
 
-
-                    }
-//                    long flushDuration = System.nanoTime() - start;
-//                    int mills = (int)((flushDuration + 1000_000 - 1) / 1000_000);
 
 //                    if(mills < flushDelay){
 //                        Thread.sleep(flushDelay - mills + 1);
@@ -728,21 +736,24 @@ public class SerialPortMediator implements IUnityController/*, com.hoho.android.
 //                    else{//
 //                        Thread.sleep(1);
 //                    }
-                    //Thread.sleep(flushDelay);
-                }
+                        //Thread.sleep(flushDelay);
+                    }
 //                catch(InterruptedException e){
 //                    DebugUnity("Flushing .run ended interrupted");
 //                    break;
 //                }
-                catch(Exception e){
-                    DebugUnity("[Flushing .run error] " + e.getMessage());
-                    // onRunError(e);
+                    catch(Exception e){
+                        DebugUnity("[Flushing .run error] " + e.getMessage());
+                        // onRunError(e);
 //                    if(!(e instanceof RuntimeException)){
                         break;
 //                    }
+                    }
                 }
+                DebugUnity("Finish flushing loop");
+                DebugUnity("isRunning" + isRunning + ", this.isInterrupted() " + this.isInterrupted() + ", isDeviceConnected: " + isDeviceConnected);
             }
-            DebugUnity("Finish flushing loop, connection alive?: " + isDeviceConnected);
+
         }
 
     }
